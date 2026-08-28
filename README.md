@@ -6,7 +6,7 @@
 
 - AstrBot WebUI 只监听 `127.0.0.1:6185`，NapCat WebUI 只映射到 `127.0.0.1:6099`。
 - OneBot 服务只监听 Docker bridge 网关 `172.30.0.1:6199`，随机 token 不进入 Git。
-- Codex 固定使用 `/home/ubuntu/.local/bin/codex exec` 和 `workspace-write` sandbox，模型只允许 `gpt-5.6-luna` 与 `gpt-5.6-sol`，默认 Luna。服务使用独立的 `astrbot/codex-home/` 保存 thread，只通过只读符号链接引用现有登录文件，不复制它。
+- Codex 固定使用 `/home/ubuntu/.local/bin/codex exec` 和 `workspace-write` sandbox，模型只允许 `gpt-5.6-luna` 与 `gpt-5.6-sol`，默认 Luna；reasoning effort 默认 `medium`。服务使用独立的 `astrbot/codex-home/` 保存 thread，只通过只读符号链接引用现有登录文件，不复制它。
 - Bridge 默认拒绝所有 QQ 用户、关闭群聊；真实使用前必须在 WebUI 填 `qq_owner_ids`。
 - OpenViking 为每个 QQ 用户及每个启用的 QQ 群创建彼此独立的 API key；QQ 号、群号和 session ID 只以单向哈希标识进入记忆服务。
 - 含 token、Cookie、OAuth、认证文件名或疑似长密钥的回合不会写入记忆。
@@ -29,7 +29,11 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 
 所有者可以按 session 选择模型：`/codex_model luna|sol|default`。私聊和每个群分别保存选择；群聊命令仍需 `@` 机器人。`/codex_default luna|sol` 设置没有单独覆盖时使用的全局默认模型。普通白名单用户不能执行模型切换命令。
 
-群聊可由所有者在目标群内使用 `@机器人 /group_context on|off|status` 单独控制上下文。开启后会在内存中缓冲最近 100 条纯文本、默认保留 24 小时，每次最多向 Codex 注入 20,000 字符；同时将合规纯文本串行、异步提交到该群独立的 OpenViking 长期记忆空间。图片、命令、疑似凭据、事件 ID 和 QQ 号元数据不进入记忆。不同群、私聊与群聊相互隔离，所有检索材料都作为不受信任的参考输入。
+所有者也可以按 session 设置 reasoning effort：`/codex_effort none|low|medium|high|xhigh|max|default`。`/codex_effort_default none|low|medium|high|xhigh|max` 修改全局默认；已单独设置的私聊或群不受影响。`/codex_status` 会同时显示当前模型、effort 和 thread 状态。
+
+QQ 文件会被复制到专用工作区的私有随机路径再交给 Codex 只读分析；单文件上限 20 MiB，每次最多 3 个且合计上限 40 MiB，暂存 7 天后清理。下载仅允许公网 HTTP(S) 目标，文件名、QQ 下载地址和暂存路径不写入 OpenViking。群文件仍要求同条消息 `@` 机器人。
+
+群聊可由所有者在目标群内使用 `@机器人 /group_context on|off|status` 单独控制上下文。开启后会在内存中缓冲最近 100 条纯文本、默认保留 24 小时，并从 OpenViking 读回精确近期消息尾部与语义长期记忆，因此插件热重载或服务重启后不只依赖内存缓冲。每次最多向 Codex 注入 20,000 字符；合规纯文本串行、异步提交到该群独立的 OpenViking 长期记忆空间。图片、命令、疑似凭据、事件 ID 和 QQ 号元数据不进入记忆。不同群、私聊与群聊相互隔离，所有检索材料都作为不受信任的参考输入。
 
 ## 迁移与快速安装
 

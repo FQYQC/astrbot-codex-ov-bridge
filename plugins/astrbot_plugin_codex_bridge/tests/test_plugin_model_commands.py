@@ -123,6 +123,32 @@ class PluginModelCommandTests(unittest.IsolatedAsyncioTestCase):
             ("gpt-5.6-sol", True),
         )
 
+    async def test_owner_can_set_session_and_default_effort(self) -> None:
+        reply = await collect(
+            self.plugin, CommandEvent("owner", "private", "/codex_effort max")
+        )
+        self.assertTrue(reply and "max" in reply[0])
+        await collect(
+            self.plugin,
+            CommandEvent("owner", "private", "/codex_effort_default high"),
+        )
+        self.assertEqual(
+            await self.plugin.effort_preferences.current("private"),
+            ("max", True),
+        )
+        self.assertEqual(await self.plugin.effort_preferences.default(), "high")
+
+    async def test_regular_user_cannot_switch_effort(self) -> None:
+        reply = await collect(
+            self.plugin,
+            CommandEvent("regular", "regular-private", "/codex_effort high"),
+        )
+        self.assertTrue(reply and "只有" in reply[0])
+        self.assertEqual(
+            await self.plugin.effort_preferences.current("regular-private"),
+            ("medium", False),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

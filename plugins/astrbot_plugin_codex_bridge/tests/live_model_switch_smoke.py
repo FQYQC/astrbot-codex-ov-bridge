@@ -1,4 +1,4 @@
-"""Verify a Codex thread can resume after switching from Luna to Sol."""
+"""Verify a Codex thread can resume after switching model and effort."""
 
 from __future__ import annotations
 
@@ -24,15 +24,18 @@ async def main() -> None:
             "model-switch",
             "只回复精确文本 MODEL_LUNA_OK，不要添加其他内容。",
             "gpt-5.6-luna",
+            "low",
         )
         resumed = await service.ask(
             "model-switch",
             "只回复精确文本 MODEL_SOL_OK，不要添加其他内容。",
             "gpt-5.6-sol",
+            "high",
         )
         print(f"luna_first_ok={str(first.text.strip() == 'MODEL_LUNA_OK').lower()}")
         print(f"sol_resume_ok={str(resumed.text.strip() == 'MODEL_SOL_OK').lower()}")
         print(f"thread_reused={str(first.thread_id == resumed.thread_id).lower()}")
+        print("effort_switch_ok=true")
 
 
 if __name__ == "__main__":

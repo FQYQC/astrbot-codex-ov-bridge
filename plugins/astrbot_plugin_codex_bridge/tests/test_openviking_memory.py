@@ -40,6 +40,21 @@ class FakeOpenVikingMemory(OpenVikingMemory):
             return 200, {"result": {"user_key": user_key}}
         if path.endswith("/search/search"):
             return 200, {"result": {"context": "isolated memory"}}
+        if "/context?" in path:
+            return 200, {
+                "result": {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Alice: 何意味"}],
+                        },
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "text": "这是测试回复"}],
+                        },
+                    ]
+                }
+            }
         return 200, {"result": {}}
 
 
@@ -102,6 +117,13 @@ class OpenVikingMemoryTests(unittest.IsolatedAsyncioTestCase):
                 for _, _, payload in business_calls
             ]
             self.assertTrue(any("Alice: 今晚八点开会" in item for item in contents))
+
+    async def test_group_raw_tail_preserves_exact_recent_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            memory = FakeOpenVikingMemory(Path(temporary_dir))
+            context = await memory.recent_group_messages("group-session")
+            self.assertIn("Alice: 何意味", context)
+            self.assertIn("机器人: 这是测试回复", context)
 
     async def test_recall_and_remember_use_user_key_not_admin_key(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

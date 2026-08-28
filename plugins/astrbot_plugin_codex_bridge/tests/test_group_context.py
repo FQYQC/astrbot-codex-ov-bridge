@@ -70,7 +70,11 @@ class FakeService:
         self.prompts: list[str] = []
 
     async def ask(
-        self, session_key: str, prompt: str, model: str | None = None
+        self,
+        session_key: str,
+        prompt: str,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> CodexResult:
         self.prompts.append(prompt)
         return CodexResult(thread_id="thread_group_12345678", text="answer")
@@ -97,6 +101,9 @@ class FakeGroupMemory:
 
     async def recall_group(self, session_key: str, query: str) -> str:
         return "群长期记忆：之前约定今晚八点开会"
+
+    async def recent_group_messages(self, session_key: str) -> str:
+        return "Alice: 何意味"
 
     async def recall(self, sender_id: str, session_key: str, query: str) -> str:
         raise AssertionError("group requests must not use per-user recall")
@@ -223,6 +230,7 @@ class PluginGroupContextTests(unittest.IsolatedAsyncioTestCase):
         prompt = self.fake_service.prompts[-1]
         self.assertIn("群长期记忆", prompt)
         self.assertIn("reference_memory", prompt)
+        self.assertIn("Alice: 何意味", prompt)
 
 
 if __name__ == "__main__":

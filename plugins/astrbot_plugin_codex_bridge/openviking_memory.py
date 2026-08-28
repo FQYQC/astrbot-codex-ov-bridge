@@ -293,6 +293,48 @@ class OpenVikingMemory:
             raise OpenVikingMemoryError("OpenViking group recall failed")
         return self._extract_context(response, 12000)
 
+    async def recent_group_messages(
+        self, session_key: str, max_chars: int = 20000
+    ) -> str:
+        """Read the exact retained message tail from the isolated group session."""
+        group_id, api_key = await self.group_key(session_key)
+        memory_session = safe_identifier("group_session", session_key)
+        quoted_session = urllib.parse.quote(memory_session, safe="")
+        status, response = await self._request(
+            f"/api/v1/sessions/{quoted_session}/context?token_budget=24000",
+            api_key,
+            actor_peer_id=group_id,
+        )
+        if status == 404:
+            return ""
+        if status != 200:
+            raise OpenVikingMemoryError("OpenViking group context failed")
+        result = response.get("result", {})
+        messages = result.get("messages", []) if isinstance(result, dict) else []
+        if not isinstance(messages, list):
+            return ""
+        lines: list[str] = []
+        for item in messages[-120:]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role", ""))
+            parts = item.get("parts", [])
+            if not isinstance(parts, list):
+                continue
+            text = "".join(
+                str(part.get("text", ""))
+                for part in parts
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            )
+            safe_text = safe_memory_text(text, 6000)
+            if not safe_text:
+                continue
+            safe_text = safe_text.replace("<", "＜").replace(">", "＞")
+            if role == "assistant":
+                safe_text = "机器人: " + safe_text
+            lines.append(safe_text)
+        return "\n".join(lines)[-max(1000, min(int(max_chars), 30000)) :]
+
     async def _commit_group_session(
         self, session_id: str, api_key: str
     ) -> None:

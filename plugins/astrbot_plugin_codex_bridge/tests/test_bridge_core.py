@@ -10,8 +10,10 @@ from astrbot_plugin_codex_bridge.bridge_core import (
     CodexBridgeService,
     CodexResult,
     CodexRunner,
+    EffortPreferenceStore,
     ModelPreferenceStore,
     SessionStore,
+    effort_from_choice,
     model_from_choice,
     split_qq_message,
 )
@@ -29,6 +31,7 @@ class FakeRunner:
         prompt: str,
         thread_id: str | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> CodexResult:
         self.active += 1
         self.max_active = max(self.max_active, self.active)
@@ -100,6 +103,27 @@ class BridgeCoreTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             runner.build_command(None, "untrusted-model")
 
+    async def test_effort_preferences_are_per_session_and_persistent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "efforts.json"
+            store = EffortPreferenceStore(path)
+            self.assertEqual(await store.current("private"), ("medium", False))
+            await store.set_default("high")
+            await store.set_session("group", "max")
+            reloaded = EffortPreferenceStore(path)
+            self.assertEqual(await reloaded.current("private"), ("high", False))
+            self.assertEqual(await reloaded.current("group"), ("max", True))
+            await reloaded.clear_session("group")
+            self.assertEqual(await reloaded.current("group"), ("high", False))
+
+    def test_runner_passes_only_allowlisted_effort(self) -> None:
+        runner = CodexRunner()
+        command = runner.build_command(None, "gpt-5.6-sol", "xhigh")
+        self.assertIn('model_reasoning_effort="xhigh"', command)
+        self.assertEqual(effort_from_choice("MAX"), "max")
+        with self.assertRaises(Exception):
+            runner.build_command(None, "gpt-5.6-sol", "unlimited")
+
     def test_jsonl_parser(self) -> None:
         output = b"\n".join(
             [
@@ -126,3 +150,4 @@ class BridgeCoreTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    effort_from_choice,

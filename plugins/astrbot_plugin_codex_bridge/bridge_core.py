@@ -17,6 +17,8 @@ CODEX_MODELS = {
     "luna": "gpt-5.6-luna",
     "sol": "gpt-5.6-sol",
 }
+CODEX_EFFORT = "medium"
+CODEX_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 CODEX_WORKSPACE = Path("/home/ubuntu/personal-ai/agent-workspace")
 CODEX_HOME = Path("/home/ubuntu/personal-ai/astrbot/codex-home")
 THREAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
@@ -115,6 +117,11 @@ def model_short_name(model: str) -> str:
     return model
 
 
+def effort_from_choice(choice: str) -> str | None:
+    normalized = choice.strip().lower()
+    return normalized if normalized in CODEX_EFFORTS else None
+
+
 class ModelPreferenceStore:
     """Private persistent default and per-session model preferences."""
 
@@ -199,6 +206,90 @@ class ModelPreferenceStore:
             return existed
 
 
+class EffortPreferenceStore:
+    """Private persistent default and per-session reasoning effort settings."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._guard = asyncio.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def _read_unlocked(self) -> dict[str, Any]:
+        state: dict[str, Any] = {"default": CODEX_EFFORT, "sessions": {}}
+        if not self.path.exists():
+            return state
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise CodexBridgeError("effort preferences are unavailable") from exc
+        if not isinstance(value, dict):
+            raise CodexBridgeError("effort preferences are invalid")
+        default = value.get("default")
+        if isinstance(default, str) and default in CODEX_EFFORTS:
+            state["default"] = default
+        sessions = value.get("sessions")
+        if isinstance(sessions, dict):
+            state["sessions"] = {
+                key: effort
+                for key, effort in sessions.items()
+                if isinstance(key, str)
+                and isinstance(effort, str)
+                and effort in CODEX_EFFORTS
+            }
+        return state
+
+    def _write_unlocked(self, value: dict[str, Any]) -> None:
+        fd, temporary_name = tempfile.mkstemp(prefix=".efforts.", dir=self.path.parent)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, self.path)
+            os.chmod(self.path, 0o600)
+        finally:
+            if os.path.exists(temporary_name):
+                os.unlink(temporary_name)
+
+    async def current(self, session_key: str) -> tuple[str, bool]:
+        async with self._guard:
+            state = self._read_unlocked()
+            sessions = state["sessions"]
+            if session_key in sessions:
+                return sessions[session_key], True
+            return str(state["default"]), False
+
+    async def default(self) -> str:
+        async with self._guard:
+            return str(self._read_unlocked()["default"])
+
+    async def set_default(self, effort: str) -> None:
+        if effort not in CODEX_EFFORTS:
+            raise CodexBridgeError("reasoning effort is not allowed")
+        async with self._guard:
+            state = self._read_unlocked()
+            state["default"] = effort
+            self._write_unlocked(state)
+
+    async def set_session(self, session_key: str, effort: str) -> None:
+        if effort not in CODEX_EFFORTS:
+            raise CodexBridgeError("reasoning effort is not allowed")
+        async with self._guard:
+            state = self._read_unlocked()
+            state["sessions"][session_key] = effort
+            self._write_unlocked(state)
+
+    async def clear_session(self, session_key: str) -> bool:
+        async with self._guard:
+            state = self._read_unlocked()
+            existed = state["sessions"].pop(session_key, None) is not None
+            if existed:
+                self._write_unlocked(state)
+            return existed
+
+
 class CodexRunner:
     def __init__(
         self,
@@ -212,16 +303,26 @@ class CodexRunner:
         self.model = model
         self.workspace = workspace
 
-    def build_command(self, thread_id: str | None, model: str | None = None) -> list[str]:
+    def build_command(
+        self,
+        thread_id: str | None,
+        model: str | None = None,
+        effort: str | None = None,
+    ) -> list[str]:
         selected_model = model or self.model
         if selected_model not in CODEX_MODELS.values():
             raise CodexBridgeError("model is not allowed")
+        selected_effort = effort or CODEX_EFFORT
+        if selected_effort not in CODEX_EFFORTS:
+            raise CodexBridgeError("reasoning effort is not allowed")
         common_config = [
             "--ignore-user-config",
             "--model",
             selected_model,
             "--config",
             'approval_policy="on-request"',
+            "--config",
+            f'model_reasoning_effort="{selected_effort}"',
         ]
         if thread_id:
             if not THREAD_ID_RE.fullmatch(thread_id):
@@ -323,11 +424,12 @@ class CodexRunner:
         prompt: str,
         thread_id: str | None = None,
         model: str | None = None,
+        effort: str | None = None,
     ) -> CodexResult:
         if not self.codex_path.is_file():
             raise CodexBridgeError("Codex CLI is unavailable")
         self.workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
-        command = self.build_command(thread_id, model)
+        command = self.build_command(thread_id, model, effort)
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -403,12 +505,13 @@ class CodexBridgeService:
         session_key: str,
         prompt: str,
         model: str | None = None,
+        effort: str | None = None,
     ) -> CodexResult:
         lock = await self._session_lock(session_key)
         async with lock:
             thread_id = await self.store.get(session_key)
             async with self._global_limit:
-                result = await self.runner.run(prompt, thread_id, model)
+                result = await self.runner.run(prompt, thread_id, model, effort)
             if result.thread_id != thread_id:
                 await self.store.set(session_key, result.thread_id)
             return result

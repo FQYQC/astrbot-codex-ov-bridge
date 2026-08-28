@@ -63,6 +63,7 @@ async def main() -> None:
                 await memory.recall_group(group_a_raw, "测试会议时间")
             except OpenVikingMemoryError:
                 recall_ok = False
+            raw_tail = await memory.recent_group_messages(group_a_raw)
             print(f"distinct_group_keys={str(key_a != key_b).lower()}")
             print(f"own_group_session_visible={str(own_status == 200).lower()}")
             print(
@@ -70,6 +71,10 @@ async def main() -> None:
                 + str(cross_status in {403, 404}).lower()
             )
             print(f"group_recall_ok={str(recall_ok).lower()}")
+            print(
+                "group_raw_tail_ok="
+                + str("群测试会议" in raw_tail).lower()
+            )
         finally:
             quoted_account = urllib.parse.quote(memory.account_id, safe="")
             for group_id in (group_a, group_b):
