@@ -1,0 +1,10 @@
+name: astrbot_plugin_codex_bridge
+display_name: Codex Bridge
+short_desc: Route allowlisted OneBot messages to the local Codex CLI.
+desc: Direct local Codex CLI bridge with isolated sessions and bounded concurrency.
+version: 0.2.0
+author: local
+repo: ""
+astrbot_version: ">=4.27,<5"
+support_platforms:
+  - aiocqhttp

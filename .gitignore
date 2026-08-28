@@ -1,0 +1,38 @@
+# Runtime data and secrets
+astrbot/data/
+astrbot/backups/
+astrbot/codex-home/
+astrbot/secrets/
+astrbot/python/
+astrbot/uv-tools/
+astrbot/.tools/
+astrbot/.uv-cache/
+astrbot/bin/
+astrbot/.astrbot
+astrbot/astrbot.lock
+napcat/app/
+napcat/backups/
+napcat/config/
+napcat/data/
+napcat/logs/
+napcat/plugins/
+napcat/qq/
+napcat/secrets/
+openviking/
+agent-workspace/
+data/
+
+# Private environment and authentication files
+*.env
+*.env.*
+!*.env.example
+auth.json
+codex_auth.json
+*.token
+*.private
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
