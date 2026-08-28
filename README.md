@@ -2,6 +2,8 @@
 
 本仓库保存可复现的部署代码：普通 QQ 经 NapCat/OneBot v11 接入 AstrBot，AstrBot 插件直接调用本机 Codex CLI，并使用 OpenViking 保存隔离的长期记忆。它不使用 VikingBot，不配置 OpenAI-compatible Provider，也不需要额外 OpenAI API Key。
 
+仓库内容与排除的运行数据详见 [`docs/REPOSITORY_CONTENTS.md`](docs/REPOSITORY_CONTENTS.md)；OpenViking 内容与灾备备份的待办项见 [`docs/BACKUP_TODO.md`](docs/BACKUP_TODO.md)。
+
 ## 安全边界
 
 - AstrBot WebUI 只监听 `127.0.0.1:6185`，NapCat WebUI 只映射到 `127.0.0.1:6099`。
