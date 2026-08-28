@@ -69,6 +69,17 @@ class BridgeCoreTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(runner.max_by_prompt["same"], 1)
 
+    async def test_busy_session_reports_that_it_will_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = FakeRunner()
+            service = CodexBridgeService(
+                runner, SessionStore(Path(tmp) / "sessions.json")
+            )
+            first = asyncio.create_task(service.ask("same", "same:first"))
+            await asyncio.sleep(0.01)
+            self.assertTrue(await service.will_queue("same"))
+            await first
+
     async def test_two_sessions_can_run_but_global_limit_is_two(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runner = FakeRunner()

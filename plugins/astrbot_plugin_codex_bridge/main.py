@@ -56,6 +56,7 @@ class CodexBridgePlugin(Star):
         self.service = CodexBridgeService(self.runner, self.store, max_concurrency=2)
         self.memory: OpenVikingMemory | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._progress_tasks: set[asyncio.Task[None]] = set()
         self._group_memory_queue: asyncio.Queue[
             tuple[str, str, str, str, str]
         ] = asyncio.Queue(maxsize=2000)
@@ -80,6 +81,45 @@ class CodexBridgePlugin(Star):
             task.cancel()
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        for task in self._progress_tasks:
+            task.cancel()
+        if self._progress_tasks:
+            await asyncio.gather(*self._progress_tasks, return_exceptions=True)
+
+    async def _send_progress(self, event: AstrMessageEvent, text: str) -> None:
+        send = getattr(event, "send", None)
+        if not callable(send):
+            return
+        try:
+            await asyncio.wait_for(send(event.plain_result(text)), timeout=10)
+        except Exception:
+            self.logger.warning("QQ progress notification failed")
+
+    def _start_progress_heartbeat(
+        self,
+        event: AstrMessageEvent,
+        done: asyncio.Event,
+    ) -> None:
+        async def heartbeat() -> None:
+            previous = 0
+            for elapsed in (45, 120):
+                try:
+                    await asyncio.wait_for(done.wait(), timeout=elapsed - previous)
+                    return
+                except TimeoutError:
+                    await self._send_progress(
+                        event,
+                        f"仍在处理中（约 {elapsed} 秒），Codex 尚未超时，请继续等待。",
+                    )
+                    previous = elapsed
+
+        task = asyncio.create_task(heartbeat())
+        self._progress_tasks.add(task)
+        task.add_done_callback(self._progress_tasks.discard)
+
+    @staticmethod
+    def _progress_enabled(is_group: bool, effort: str) -> bool:
+        return not is_group and effort in {"medium", "high", "xhigh", "max"}
 
     def _remember_background(
         self,
@@ -533,18 +573,41 @@ class CodexBridgePlugin(Star):
             )
             return
 
+        selected_model, _ = await self.model_preferences.current(session_key)
+        selected_effort, _ = await self.effort_preferences.current(session_key)
+        progress_done: asyncio.Event | None = None
+        if self._progress_enabled(is_group, selected_effort):
+            queued = await self.service.will_queue(session_key)
+            await self._send_progress(
+                event,
+                ("已收到，正在排队" if queued else "已收到，开始处理")
+                + "（"
+                + model_short_name(selected_model)
+                + " / "
+                + selected_effort
+                + "）。",
+            )
+            progress_done = asyncio.Event()
+            self._start_progress_heartbeat(event, progress_done)
+
         uploaded_paths: list[str] = []
         if file_components:
             try:
                 staged = await self.attachments.stage(session_key, file_components)
                 uploaded_paths = [str(path) for path in staged]
             except AttachmentTooLargeError:
+                if progress_done is not None:
+                    progress_done.set()
                 yield event.plain_result("文件过大：单文件上限 20 MiB，总量上限 40 MiB。")
                 return
             except AttachmentError:
+                if progress_done is not None:
+                    progress_done.set()
                 yield event.plain_result("文件接收失败，请确认文件仍可下载后重试。")
                 return
             except Exception:
+                if progress_done is not None:
+                    progress_done.set()
                 self.logger.warning("QQ attachment staging failed")
                 yield event.plain_result("文件接收失败，请稍后重试。")
                 return
@@ -552,8 +615,6 @@ class CodexBridgePlugin(Star):
                 message = "请读取并分析我本次上传的文件，先简要说明文件内容。"
 
         try:
-            selected_model, _ = await self.model_preferences.current(session_key)
-            selected_effort, _ = await self.effort_preferences.current(session_key)
             reference_memory = ""
             if self.memory is not None:
                 try:
@@ -591,6 +652,8 @@ class CodexBridgePlugin(Star):
                 selected_effort,
             )
         except CodexTimeoutError:
+            if progress_done is not None:
+                progress_done.set()
             if is_group and group_context_enabled and group_text_added:
                 self._queue_group_memory(
                     "message", session_key, sender_label, message
@@ -598,6 +661,8 @@ class CodexBridgePlugin(Star):
             yield event.plain_result("Codex 本次处理超时，请稍后重试。")
             return
         except CodexBridgeError:
+            if progress_done is not None:
+                progress_done.set()
             if is_group and group_context_enabled and group_text_added:
                 self._queue_group_memory(
                     "message", session_key, sender_label, message
@@ -605,6 +670,8 @@ class CodexBridgePlugin(Star):
             yield event.plain_result("Codex 本次处理失败，请稍后重试或使用 /codex_new。")
             return
         except Exception:
+            if progress_done is not None:
+                progress_done.set()
             if is_group and group_context_enabled and group_text_added:
                 self._queue_group_memory(
                     "message", session_key, sender_label, message
@@ -613,6 +680,8 @@ class CodexBridgePlugin(Star):
             yield event.plain_result("Codex Bridge 暂时不可用，请稍后重试。")
             return
 
+        if progress_done is not None:
+            progress_done.set()
         if is_group and group_context_enabled:
             self._queue_group_memory(
                 "turn", session_key, sender_label, message, result.text

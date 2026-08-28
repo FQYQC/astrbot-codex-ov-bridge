@@ -500,6 +500,11 @@ class CodexBridgeService:
         async with self._locks_guard:
             return self._session_locks.setdefault(session_key, asyncio.Lock())
 
+    async def will_queue(self, session_key: str) -> bool:
+        """Return a best-effort queue hint for user-facing progress messages."""
+        lock = await self._session_lock(session_key)
+        return lock.locked() or self._global_limit.locked()
+
     async def ask(
         self,
         session_key: str,

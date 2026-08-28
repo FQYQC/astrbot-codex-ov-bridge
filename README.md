@@ -31,6 +31,8 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 
 所有者也可以按 session 设置 reasoning effort：`/codex_effort none|low|medium|high|xhigh|max|default`。`/codex_effort_default none|low|medium|high|xhigh|max` 修改全局默认；已单独设置的私聊或群不受影响。`/codex_status` 会同时显示当前模型、effort 和 thread 状态。
 
+仅在私聊且当前 effort 为 `medium`/`high`/`xhigh`/`max` 时，Bridge 会立即回复已开始或已排队（含模型和 effort）；45 秒、120 秒仍未完成时各补充一次进度提示。`none`/`low` 以及所有群聊都不发进度消息，避免刷屏。
+
 QQ 文件会被复制到专用工作区的私有随机路径再交给 Codex 只读分析；单文件上限 20 MiB，每次最多 3 个且合计上限 40 MiB，暂存 7 天后清理。下载仅允许公网 HTTP(S) 目标，文件名、QQ 下载地址和暂存路径不写入 OpenViking。群文件仍要求同条消息 `@` 机器人。
 
 群聊可由所有者在目标群内使用 `@机器人 /group_context on|off|status` 单独控制上下文。开启后会在内存中缓冲最近 100 条纯文本、默认保留 24 小时，并从 OpenViking 读回精确近期消息尾部与语义长期记忆，因此插件热重载或服务重启后不只依赖内存缓冲。每次最多向 Codex 注入 20,000 字符；合规纯文本串行、异步提交到该群独立的 OpenViking 长期记忆空间。图片、命令、疑似凭据、事件 ID 和 QQ 号元数据不进入记忆。不同群、私聊与群聊相互隔离，所有检索材料都作为不受信任的参考输入。

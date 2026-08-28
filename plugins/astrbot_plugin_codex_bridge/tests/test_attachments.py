@@ -22,6 +22,7 @@ from astrbot_plugin_codex_bridge.main import CodexBridgePlugin
 class FileEvent:
     def __init__(self, file_component: Comp.File) -> None:
         self.file_component = file_component
+        self.sent: list[str] = []
 
     def should_call_llm(self, value: bool) -> None:
         return None
@@ -50,10 +51,16 @@ class FileEvent:
     def plain_result(self, text: str) -> str:
         return text
 
+    async def send(self, message: str) -> None:
+        self.sent.append(message)
+
 
 class FakeService:
     def __init__(self) -> None:
         self.prompts: list[str] = []
+
+    async def will_queue(self, session_key: str) -> bool:
+        return False
 
     async def ask(
         self,
@@ -130,6 +137,31 @@ class PluginAttachmentTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(str(root / "attachments"), prompt)
             self.assertNotIn(str(source), prompt)
             self.assertIn("不受信任文件", prompt)
+            self.assertEqual(len(event.sent), 1)
+            self.assertIn("开始处理", event.sent[0])
+
+    async def test_low_effort_private_file_does_not_send_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "input.txt"
+            source.write_text("small", encoding="utf-8")
+            with patch.object(StarTools, "get_data_dir", return_value=root / "data"):
+                plugin = CodexBridgePlugin(
+                    object(),
+                    {
+                        "qq_owner_ids": ["owner"],
+                        "group_chat_enabled": False,
+                        "memory_enabled": False,
+                    },
+                )
+            self.addAsyncCleanup(plugin.terminate)
+            await plugin.effort_preferences.set_session("private-session", "low")
+            plugin.attachments = AttachmentManager(root / "attachments")
+            plugin.service = FakeService()  # type: ignore[assignment]
+            event = FileEvent(Comp.File(name="input.txt", file=str(source)))
+            replies = [item async for item in plugin.handle_onebot(event)]
+            self.assertEqual(replies, ["file answer"])
+            self.assertEqual(event.sent, [])
 
 
 if __name__ == "__main__":
