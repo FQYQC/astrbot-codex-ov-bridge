@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ class FakeOpenVikingMemory(OpenVikingMemory):
         )
         self.provisioned: dict[str, str] = {}
         self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
+        self.rejected_keys: set[str] = set()
 
     async def _request(  # type: ignore[override]
         self,
@@ -35,9 +37,18 @@ class FakeOpenVikingMemory(OpenVikingMemory):
         self.calls.append((path, api_key, payload))
         if path.endswith("/users"):
             user_id = str((payload or {}).get("user_id", ""))
+            if user_id in self.provisioned:
+                return 409, {"error": {"code": "USER_EXISTS"}}
             user_key = "key_" + user_id + "_" + "x" * 32
             self.provisioned[user_id] = user_key
             return 200, {"result": {"user_key": user_key}}
+        if path.endswith("/key") and "/admin/" in path:
+            user_id = urllib.parse.unquote(path.rsplit("/", 2)[-2])
+            user_key = "rotated_" + user_id + "_" + "y" * 32
+            self.provisioned[user_id] = user_key
+            return 200, {"result": {"user_key": user_key}}
+        if api_key in self.rejected_keys:
+            return 401, {"error": {"code": "UNAUTHENTICATED"}}
         if path.endswith("/search/search"):
             return 200, {"result": {"context": "isolated memory"}}
         if "/context?" in path:
@@ -136,6 +147,28 @@ class OpenVikingMemoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 all(call[1] != memory.admin_api_key for call in business_calls)
             )
+
+    async def test_rejected_group_key_is_rotated_and_retried_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            memory = FakeOpenVikingMemory(Path(temporary_dir))
+            raw_group = "group-session"
+            group_id = safe_identifier("group", raw_group)
+            stale_key = "stale_" + "z" * 48
+            await memory.keys.set(group_id, stale_key)
+            memory.provisioned[group_id] = stale_key
+            memory.rejected_keys.add(stale_key)
+
+            context = await memory.recall_group(raw_group, "会议时间")
+            _, refreshed_key = await memory.group_key(raw_group)
+
+            self.assertEqual(context, "isolated memory")
+            self.assertNotEqual(refreshed_key, stale_key)
+            self.assertTrue(refreshed_key.startswith("rotated_"))
+            business_keys = [
+                key for path, key, _ in memory.calls if "/admin/" not in path
+            ]
+            self.assertIn(stale_key, business_keys)
+            self.assertIn(refreshed_key, business_keys)
 
 
 if __name__ == "__main__":

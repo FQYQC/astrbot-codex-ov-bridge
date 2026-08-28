@@ -22,6 +22,7 @@ class CommandEvent:
     ) -> None:
         self.sender_id = sender_id
         self.session_id = session_id
+        self.unified_msg_origin = session_id
         self.message = message
         self.components = components or []
         self.call_llm = True
@@ -48,6 +49,9 @@ class CommandEvent:
     def get_self_id(self) -> str:
         return "bot"
 
+    def get_platform_name(self) -> str:
+        return "aiocqhttp"
+
     def get_messages(self) -> list[object]:
         return self.components
 
@@ -57,6 +61,25 @@ class CommandEvent:
 
 async def collect(plugin: CodexBridgePlugin, event: CommandEvent) -> list[str]:
     return [item async for item in plugin.handle_onebot(event)]
+
+
+class FakePersonaAdapter:
+    def __init__(self) -> None:
+        self.selection: str | None = None
+
+    async def current_id(self, event: CommandEvent) -> str:
+        return self.selection or "default"
+
+    def available_ids(self) -> list[str]:
+        return ["created-persona", "测试人格"]
+
+    def match_available_id(self, requested: str) -> str | None:
+        return requested if requested in self.available_ids() else None
+
+    async def set_session_selection(
+        self, event: CommandEvent, persona_id: str | None
+    ) -> None:
+        self.selection = persona_id
 
 
 class PluginModelCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -148,6 +171,30 @@ class PluginModelCommandTests(unittest.IsolatedAsyncioTestCase):
             await self.plugin.effort_preferences.current("regular-private"),
             ("medium", False),
         )
+
+    async def test_owner_can_select_session_persona_and_thread_is_reset(self) -> None:
+        adapter = FakePersonaAdapter()
+        self.plugin.persona_adapter = adapter
+        await self.plugin.store.set(
+            "private", "00000000-0000-4000-8000-000000000001"
+        )
+        reply = await collect(
+            self.plugin,
+            CommandEvent("owner", "private", "/codex_persona created-persona"),
+        )
+        self.assertTrue(reply and "created-persona" in reply[0])
+        self.assertEqual(adapter.selection, "created-persona")
+        self.assertFalse(await self.plugin.store.has("private"))
+
+    async def test_regular_user_cannot_switch_persona(self) -> None:
+        adapter = FakePersonaAdapter()
+        self.plugin.persona_adapter = adapter
+        reply = await collect(
+            self.plugin,
+            CommandEvent("regular", "regular-private", "/codex_persona 测试人格"),
+        )
+        self.assertTrue(reply and "只有" in reply[0])
+        self.assertIsNone(adapter.selection)
 
 
 if __name__ == "__main__":

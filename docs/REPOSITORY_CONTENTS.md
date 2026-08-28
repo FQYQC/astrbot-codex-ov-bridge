@@ -9,8 +9,10 @@ kept outside Git.
 - `plugins/astrbot_plugin_codex_bridge/`
   - OneBot-only AstrBot plugin that invokes the local Codex CLI.
   - Persistent per-session Codex thread, model, and reasoning-effort selection.
+  - AstrBot-native default, conversation, and owner-controlled per-session persona resolution/selection.
   - QQ file staging with size limits and public-network-only downloads.
-  - Isolated OpenViking private-user and per-group memory integration.
+  - Isolated OpenViking private-user and per-group memory integration with
+    stale scoped-key self-healing.
   - Owner-only management commands, group mention policy, two main-task slots,
     two isolated Luna progress-summary slots, detailed TODO notifications,
     output splitting, and privacy filters.

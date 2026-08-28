@@ -21,6 +21,12 @@
     "type": "bool",
     "default": true
   },
+  "astrbot_persona_enabled": {
+    "description": "将 AstrBot 当前 session 选中的原生人格应用到 Codex",
+    "type": "bool",
+    "default": true,
+    "hint": "按 AstrBot 的 session 强制人格、conversation 人格、WebUI 默认人格顺序解析；不会调用 AstrBot 默认 LLM Provider。"
+  },
   "group_context_max_messages": {
     "description": "群近期内存上下文最多保留的纯文本条数（不限制 OV 长期记忆）",
     "type": "int",

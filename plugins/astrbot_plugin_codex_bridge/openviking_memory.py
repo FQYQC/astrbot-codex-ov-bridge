@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
 import os
@@ -11,6 +12,8 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +177,29 @@ class OpenVikingMemory:
         async with self._provision_guard:
             return self._provision_locks.setdefault(user_id, asyncio.Lock())
 
+    @asynccontextmanager
+    async def _principal_file_lock(self) -> AsyncIterator[None]:
+        """Serialize key issuance across overlapping plugin instances."""
+        lock_path = self.keys.path.parent / ".memory-users.lock"
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        os.chmod(lock_path, 0o600)
+        try:
+            deadline = asyncio.get_running_loop().time() + 10
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError as exc:
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise OpenVikingMemoryError(
+                            "OpenViking key coordination timed out"
+                        ) from exc
+                    await asyncio.sleep(0.05)
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
     async def _principal_key(self, prefix: str, raw_id: str) -> tuple[str, str]:
         user_id = safe_identifier(prefix, raw_id)
         existing = await self.keys.get(user_id)
@@ -181,31 +207,82 @@ class OpenVikingMemory:
             return user_id, existing
         lock = await self._user_lock(user_id)
         async with lock:
-            existing = await self.keys.get(user_id)
-            if existing:
-                return user_id, existing
-            quoted_account = urllib.parse.quote(self.account_id, safe="")
+            async with self._principal_file_lock():
+                existing = await self.keys.get(user_id)
+                if existing:
+                    return user_id, existing
+                api_key = await self._issue_principal_key(user_id)
+                await self.keys.set(user_id, api_key)
+                return user_id, api_key
+
+    async def _issue_principal_key(self, user_id: str) -> str:
+        """Create a scoped user or rotate its key without exposing credentials."""
+        quoted_account = urllib.parse.quote(self.account_id, safe="")
+        status, response = await self._request(
+            f"/api/v1/admin/accounts/{quoted_account}/users",
+            self.admin_api_key,
+            method="POST",
+            payload={"user_id": user_id, "role": "user"},
+        )
+        if status in {400, 409}:
+            quoted_user = urllib.parse.quote(user_id, safe="")
             status, response = await self._request(
-                f"/api/v1/admin/accounts/{quoted_account}/users",
+                f"/api/v1/admin/accounts/{quoted_account}/users/{quoted_user}/key",
                 self.admin_api_key,
                 method="POST",
-                payload={"user_id": user_id, "role": "user"},
+                payload={},
             )
-            if status in {400, 409}:
-                quoted_user = urllib.parse.quote(user_id, safe="")
-                status, response = await self._request(
-                    f"/api/v1/admin/accounts/{quoted_account}/users/{quoted_user}/key",
-                    self.admin_api_key,
-                    method="POST",
-                    payload={},
-                )
-            if status != 200:
-                raise OpenVikingMemoryError("OpenViking user provisioning failed")
-            api_key = str(response.get("result", {}).get("user_key", "")).strip()
-            if len(api_key) < 32:
-                raise OpenVikingMemoryError("OpenViking did not return a user key")
-            await self.keys.set(user_id, api_key)
-            return user_id, api_key
+        if status != 200:
+            raise OpenVikingMemoryError("OpenViking user provisioning failed")
+        api_key = str(response.get("result", {}).get("user_key", "")).strip()
+        if len(api_key) < 32:
+            raise OpenVikingMemoryError("OpenViking did not return a user key")
+        return api_key
+
+    async def _refresh_principal_key(
+        self, prefix: str, raw_id: str, rejected_key: str
+    ) -> tuple[str, str]:
+        """Rotate a stale scoped key once, serialized per principal."""
+        user_id = safe_identifier(prefix, raw_id)
+        lock = await self._user_lock(user_id)
+        async with lock:
+            async with self._principal_file_lock():
+                current = await self.keys.get(user_id)
+                if current and current != rejected_key:
+                    return user_id, current
+                refreshed = await self._issue_principal_key(user_id)
+                await self.keys.set(user_id, refreshed)
+                return user_id, refreshed
+
+    async def _principal_request(
+        self,
+        prefix: str,
+        raw_id: str,
+        path: str,
+        method: str = "GET",
+        payload: dict[str, Any] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        """Use a scoped principal and self-heal once after a rejected key."""
+        actor_id, api_key = await self._principal_key(prefix, raw_id)
+        status, response = await self._request(
+            path,
+            api_key,
+            method=method,
+            payload=payload,
+            actor_peer_id=actor_id,
+        )
+        if status != 401:
+            return status, response
+        actor_id, api_key = await self._refresh_principal_key(
+            prefix, raw_id, api_key
+        )
+        return await self._request(
+            path,
+            api_key,
+            method=method,
+            payload=payload,
+            actor_peer_id=actor_id,
+        )
 
     async def user_key(self, sender_id: str) -> tuple[str, str]:
         return await self._principal_key("qq", sender_id)
@@ -241,13 +318,12 @@ class OpenVikingMemory:
         safe_query = safe_memory_text(query, 4000)
         if not safe_query:
             return ""
-        user_id, api_key = await self.user_key(sender_id)
         memory_session = safe_identifier("session", session_key)
-        status, response = await self._request(
+        status, response = await self._principal_request(
+            "qq",
+            sender_id,
             "/api/v1/search/search",
-            api_key,
             method="POST",
-            actor_peer_id=user_id,
             payload={
                 "query": safe_query,
                 "session_id": memory_session,
@@ -269,13 +345,12 @@ class OpenVikingMemory:
         safe_query = safe_memory_text(query, 4000)
         if not safe_query:
             return ""
-        group_id, api_key = await self.group_key(session_key)
         memory_session = safe_identifier("group_session", session_key)
-        status, response = await self._request(
+        status, response = await self._principal_request(
+            "group",
+            session_key,
             "/api/v1/search/search",
-            api_key,
             method="POST",
-            actor_peer_id=group_id,
             payload={
                 "query": safe_query,
                 "session_id": memory_session,
@@ -297,13 +372,12 @@ class OpenVikingMemory:
         self, session_key: str, max_chars: int = 20000
     ) -> str:
         """Read the exact retained message tail from the isolated group session."""
-        group_id, api_key = await self.group_key(session_key)
         memory_session = safe_identifier("group_session", session_key)
         quoted_session = urllib.parse.quote(memory_session, safe="")
-        status, response = await self._request(
+        status, response = await self._principal_request(
+            "group",
+            session_key,
             f"/api/v1/sessions/{quoted_session}/context?token_budget=24000",
-            api_key,
-            actor_peer_id=group_id,
         )
         if status == 404:
             return ""
@@ -336,12 +410,13 @@ class OpenVikingMemory:
         return "\n".join(lines)[-max(1000, min(int(max_chars), 30000)) :]
 
     async def _commit_group_session(
-        self, session_id: str, api_key: str
+        self, session_id: str, session_key: str
     ) -> None:
         quoted_session = urllib.parse.quote(session_id, safe="")
-        status, _ = await self._request(
+        status, _ = await self._principal_request(
+            "group",
+            session_key,
             f"/api/v1/sessions/{quoted_session}/commit",
-            api_key,
             method="POST",
             payload={
                 "retention_mode": "turn_budget",
@@ -363,16 +438,16 @@ class OpenVikingMemory:
         safe_message = safe_group_memory_text(sender_label, message)
         if not safe_message:
             return
-        group_id, api_key = await self.group_key(session_key)
         session_id = safe_identifier("group_session", session_key)
         quoted_session = urllib.parse.quote(session_id, safe="")
-        status, _ = await self._request(
+        status, _ = await self._principal_request(
+            "group",
+            session_key,
             f"/api/v1/sessions/{quoted_session}/messages",
-            api_key,
             method="POST",
             payload={
                 "role": "user",
-                "peer_id": group_id,
+                "peer_id": safe_identifier("group", session_key),
                 "content": safe_message,
                 "message_kind": "user_query",
                 "telemetry": False,
@@ -380,7 +455,7 @@ class OpenVikingMemory:
         )
         if status != 200:
             raise OpenVikingMemoryError("OpenViking group message write failed")
-        await self._commit_group_session(session_id, api_key)
+        await self._commit_group_session(session_id, session_key)
 
     async def remember_group_turn(
         self,
@@ -393,16 +468,17 @@ class OpenVikingMemory:
         safe_assistant = safe_memory_text(assistant_message, 12000)
         if not safe_user or not safe_assistant:
             return
-        group_id, api_key = await self.group_key(session_key)
+        group_id = safe_identifier("group", session_key)
         session_id = safe_identifier("group_session", session_key)
         quoted_session = urllib.parse.quote(session_id, safe="")
         for role, content, message_kind in (
             ("user", safe_user, "user_query"),
             ("assistant", safe_assistant, "assistant_step"),
         ):
-            status, _ = await self._request(
+            status, _ = await self._principal_request(
+                "group",
+                session_key,
                 f"/api/v1/sessions/{quoted_session}/messages",
-                api_key,
                 method="POST",
                 payload={
                     "role": role,
@@ -414,7 +490,7 @@ class OpenVikingMemory:
             )
             if status != 200:
                 raise OpenVikingMemoryError("OpenViking group turn write failed")
-        await self._commit_group_session(session_id, api_key)
+        await self._commit_group_session(session_id, session_key)
 
     async def remember(
         self,
@@ -427,16 +503,17 @@ class OpenVikingMemory:
         safe_assistant = safe_memory_text(assistant_message, 12000)
         if not safe_user or not safe_assistant:
             return
-        user_id, api_key = await self.user_key(sender_id)
+        user_id = safe_identifier("qq", sender_id)
         session_id = safe_identifier("session", session_key)
         quoted_session = urllib.parse.quote(session_id, safe="")
         for role, content, message_kind in (
             ("user", safe_user, "user_query"),
             ("assistant", safe_assistant, "assistant_step"),
         ):
-            status, _ = await self._request(
+            status, _ = await self._principal_request(
+                "qq",
+                sender_id,
                 f"/api/v1/sessions/{quoted_session}/messages",
-                api_key,
                 method="POST",
                 payload={
                     "role": role,
@@ -448,9 +525,10 @@ class OpenVikingMemory:
             )
             if status != 200:
                 raise OpenVikingMemoryError("OpenViking message write failed")
-        status, _ = await self._request(
+        status, _ = await self._principal_request(
+            "qq",
+            sender_id,
             f"/api/v1/sessions/{quoted_session}/commit",
-            api_key,
             method="POST",
             payload={
                 "retention_mode": "turn_budget",

@@ -33,6 +33,8 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 
 所有者也可以按 session 设置 reasoning effort：`/codex_effort none|low|medium|high|xhigh|max|default`。`/codex_effort_default none|low|medium|high|xhigh|max` 修改全局默认；已单独设置的私聊或群不受影响。`/codex_status` 会同时显示当前模型、effort 和 thread 状态。
 
+Bridge 会复用 AstrBot 原生人格系统。最终人格按 AstrBot 的 session 强制人格、当前 conversation 人格、WebUI 默认人格顺序解析，并作为受信任的独立指令块交给 Codex；这不会启用或调用 AstrBot 的普通 LLM Provider。人格仍在 AstrBot WebUI 中创建、编辑；所有者可在 QQ 会话内用 `/codex_persona list`、`/codex_persona <人格名>`、`/codex_persona inherit`、`/codex_persona off` 查看或切换。切换会清除当前 Codex thread 映射，避免旧人格残留；`/codex_status` 会显示 Bridge 当前解析到的人格 ID。人格的工具/Skills 白名单暂不直接映射到 Codex CLI，因为两边工具模型不同。
+
 仅在私聊且当前 effort 为 `medium`/`high`/`xhigh`/`max` 时，Bridge 会立即回复已开始或已排队（含模型和 effort），之后默认每 120 秒发送一次项目相关的 TODO 进度：具体列出已完成、正在进行和下一步。进度来自主 Codex 的 JSONL `todo_list` 与插件自身的阶段状态，再交给独立的 `gpt-5.6-luna`/`low` 只读临时会话整理；它不接收原始 QQ 消息、回复正文、命令输出、日志、路径或凭据。Luna 总结失败时自动回退到本地生成的详细 TODO，不影响主任务。`none`/`low` 以及所有群聊都不发进度消息，避免刷屏。
 
 主任务仍限制为最多 2 个不同 session 并发、同一 session 串行；进度总结另有 2 个独立 Luna 槽位，因此最多可同时运行 2 个主任务和 2 个轻量总结任务。总结会话使用 `--ephemeral`、`read-only` sandbox，不占主任务队列。单次主任务超时可在 WebUI 配置为 10–3600 秒；当前部署使用 2400 秒，超时后 Bridge 会终止对应 Codex 进程而不是放任其后台继续。
@@ -40,6 +42,8 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 QQ 文件会被复制到专用工作区的私有随机路径再交给 Codex 只读分析；单文件上限 20 MiB，每次最多 3 个且合计上限 40 MiB，暂存 7 天后清理。下载仅允许公网 HTTP(S) 目标，文件名、QQ 下载地址和暂存路径不写入 OpenViking。群文件仍要求同条消息 `@` 机器人。
 
 群聊可由所有者在目标群内使用 `@机器人 /group_context on|off|status` 单独控制上下文。开启后会在内存中缓冲最近 100 条纯文本、默认保留 24 小时，并从 OpenViking 读回精确近期消息尾部与语义长期记忆，因此插件热重载或服务重启后不只依赖内存缓冲。每次最多向 Codex 注入 20,000 字符；合规纯文本串行、异步提交到该群独立的 OpenViking 长期记忆空间。图片、命令、疑似凭据、事件 ID 和 QQ 号元数据不进入记忆。不同群、私聊与群聊相互隔离，所有检索材料都作为不受信任的参考输入。
+
+每个 QQ 用户和群使用独立的 OpenViking scoped user key。若 OpenViking 返回 401，Bridge 会在跨实例文件锁保护下为该 principal 轮换 key 并重试一次，避免 AstrBot 热重载期间重复签发造成旧 key 留存。轮换只更新权限凭据，不删除该用户或群已有记忆。
 
 ## 迁移与快速安装
 
