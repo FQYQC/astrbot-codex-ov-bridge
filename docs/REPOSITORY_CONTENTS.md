@@ -35,5 +35,5 @@ The following are ignored and must never be pushed to GitHub:
 - Codex/ChatGPT authentication files and OAuth material.
 - QQ attachment staging files and the Codex agent workspace.
 
-These items require a separate encrypted backup and restore workflow. See
-[`BACKUP_TODO.md`](BACKUP_TODO.md).
+These items require a separate encrypted backup and restore workflow. Private
+operational plans and credentials are not tracked in this repository.
