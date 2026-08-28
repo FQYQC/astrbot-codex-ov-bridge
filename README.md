@@ -27,6 +27,8 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 
 在 AstrBot 的插件配置中打开 `Codex Bridge`：把自己的 QQ 号填入 `qq_owner_ids`，保持 `group_chat_enabled=false`，保存后重载插件。所有者会自动获得使用权限；无需重复填普通白名单。
 
+所有者可以按 session 选择模型：`/codex_model luna|sol|default`。私聊和每个群分别保存选择；群聊命令仍需 `@` 机器人。`/codex_default luna|sol` 设置没有单独覆盖时使用的全局默认模型。普通白名单用户不能执行模型切换命令。
+
 ## 迁移与快速安装
 
 新服务器先安装 Docker/Compose 和 Codex CLI，并完成 ChatGPT 订阅登录；恢复 OpenViking 配置与数据后，将本仓库放到 `/home/ubuntu/personal-ai`，执行：

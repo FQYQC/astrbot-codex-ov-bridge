@@ -9,12 +9,14 @@ from astrbot.api.platform import MessageType
 from astrbot.api.star import Context, Star, StarTools
 
 from .bridge_core import (
-    CODEX_MODEL,
     CodexBridgeError,
     CodexBridgeService,
     CodexRunner,
     CodexTimeoutError,
+    ModelPreferenceStore,
     SessionStore,
+    model_from_choice,
+    model_short_name,
     split_qq_message,
 )
 from .openviking_memory import OpenVikingMemory, OpenVikingMemoryError
@@ -31,6 +33,7 @@ class CodexBridgePlugin(Star):
         self.chunk_chars = max(200, min(chunk_chars, 3000))
         self.runner = CodexRunner(timeout_seconds=timeout)
         self.store = SessionStore(data_dir / "sessions.json")
+        self.model_preferences = ModelPreferenceStore(data_dir / "models.json")
         self.service = CodexBridgeService(self.runner, self.store, max_concurrency=2)
         self.memory: OpenVikingMemory | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
@@ -144,6 +147,10 @@ class CodexBridgePlugin(Star):
         message = event.get_message_str().strip()
         if not session_key or not message:
             return
+        command_parts = message.split()
+        command = command_parts[0].lower()
+        arguments = [part.lower() for part in command_parts[1:]]
+        is_owner = sender_id in self._owners()
 
         if message == "/codex_new":
             await self.store.delete(session_key)
@@ -154,13 +161,77 @@ class CodexBridgePlugin(Star):
             suffix = "已删除当前映射。" if removed else "当前没有已保存的映射。"
             yield event.plain_result(suffix)
             return
+        if command == "/codex_model":
+            current_model, overridden = await self.model_preferences.current(session_key)
+            default_model = await self.model_preferences.default()
+            if not arguments:
+                yield event.plain_result(
+                    "当前 session 模型："
+                    + model_short_name(current_model)
+                    + ("（单独设置）" if overridden else "（跟随默认）")
+                    + "\n全局默认模型："
+                    + model_short_name(default_model)
+                )
+                return
+            if not is_owner:
+                yield event.plain_result("只有 Bridge 所有者可以切换模型。")
+                return
+            if len(arguments) != 1:
+                yield event.plain_result("用法：/codex_model luna|sol|default")
+                return
+            if arguments[0] == "default":
+                await self.model_preferences.clear_session(session_key)
+                selected_model, _ = await self.model_preferences.current(session_key)
+                yield event.plain_result(
+                    "当前 session 已改为跟随默认模型："
+                    + model_short_name(selected_model)
+                )
+                return
+            selected_model = model_from_choice(arguments[0])
+            if selected_model is None:
+                yield event.plain_result("用法：/codex_model luna|sol|default")
+                return
+            await self.model_preferences.set_session(session_key, selected_model)
+            yield event.plain_result(
+                "当前 session 模型已切换为：" + model_short_name(selected_model)
+            )
+            return
+        if command == "/codex_default":
+            if not is_owner:
+                yield event.plain_result("只有 Bridge 所有者可以切换默认模型。")
+                return
+            if len(arguments) != 1:
+                current_default = await self.model_preferences.default()
+                yield event.plain_result(
+                    "用法：/codex_default luna|sol\n当前默认："
+                    + model_short_name(current_default)
+                )
+                return
+            selected_model = model_from_choice(arguments[0])
+            if selected_model is None:
+                yield event.plain_result("用法：/codex_default luna|sol")
+                return
+            await self.model_preferences.set_default(selected_model)
+            yield event.plain_result(
+                "全局默认模型已切换为："
+                + model_short_name(selected_model)
+                + "\n已有单独设置的 session 不受影响。"
+            )
+            return
         if message == "/codex_status":
             logged_in = await self.runner.is_logged_in()
             has_thread = await self.store.has(session_key)
+            selected_model, overridden = await self.model_preferences.current(session_key)
+            default_model = await self.model_preferences.default()
             yield event.plain_result(
                 "Codex 登录："
                 + ("有效" if logged_in else "不可用")
-                + f"\n模型：{CODEX_MODEL}\n当前 thread："
+                + "\n当前模型："
+                + model_short_name(selected_model)
+                + ("（单独设置）" if overridden else "（跟随默认）")
+                + "\n默认模型："
+                + model_short_name(default_model)
+                + "\n当前 thread："
                 + ("已建立" if has_thread else "尚未建立")
                 + "\n长期记忆："
                 + ("已启用" if self.memory is not None else "未启用")
@@ -170,6 +241,7 @@ class CodexBridgePlugin(Star):
             return
 
         try:
+            selected_model, _ = await self.model_preferences.current(session_key)
             reference_memory = ""
             if self.memory is not None:
                 try:
@@ -179,7 +251,9 @@ class CodexBridgePlugin(Star):
                 except OpenVikingMemoryError:
                     self.logger.warning("OpenViking memory recall failed")
             result = await self.service.ask(
-                session_key, self._build_prompt(message, reference_memory)
+                session_key,
+                self._build_prompt(message, reference_memory),
+                selected_model,
             )
         except CodexTimeoutError:
             yield event.plain_result("Codex 本次处理超时，请稍后重试。")

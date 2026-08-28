@@ -10,7 +10,9 @@ from astrbot_plugin_codex_bridge.bridge_core import (
     CodexBridgeService,
     CodexResult,
     CodexRunner,
+    ModelPreferenceStore,
     SessionStore,
+    model_from_choice,
     split_qq_message,
 )
 
@@ -22,7 +24,12 @@ class FakeRunner:
         self.active_by_prompt: dict[str, int] = {}
         self.max_by_prompt: dict[str, int] = {}
 
-    async def run(self, prompt: str, thread_id: str | None = None) -> CodexResult:
+    async def run(
+        self,
+        prompt: str,
+        thread_id: str | None = None,
+        model: str | None = None,
+    ) -> CodexResult:
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         key = prompt.split(":", 1)[0]
@@ -71,6 +78,27 @@ class BridgeCoreTests(unittest.IsolatedAsyncioTestCase):
                 service.ask("c", "c:one"),
             )
             self.assertEqual(runner.max_active, 2)
+
+    async def test_model_preferences_are_per_session_and_persistent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "models.json"
+            store = ModelPreferenceStore(path)
+            self.assertEqual(await store.current("private"), ("gpt-5.6-luna", False))
+            await store.set_default("gpt-5.6-sol")
+            await store.set_session("group", "gpt-5.6-luna")
+            reloaded = ModelPreferenceStore(path)
+            self.assertEqual(await reloaded.current("private"), ("gpt-5.6-sol", False))
+            self.assertEqual(await reloaded.current("group"), ("gpt-5.6-luna", True))
+            await reloaded.clear_session("group")
+            self.assertEqual(await reloaded.current("group"), ("gpt-5.6-sol", False))
+
+    def test_runner_accepts_only_allowlisted_models(self) -> None:
+        runner = CodexRunner()
+        command = runner.build_command(None, "gpt-5.6-sol")
+        self.assertEqual(command[command.index("--model") + 1], "gpt-5.6-sol")
+        self.assertEqual(model_from_choice("LUNA"), "gpt-5.6-luna")
+        with self.assertRaises(Exception):
+            runner.build_command(None, "untrusted-model")
 
     def test_jsonl_parser(self) -> None:
         output = b"\n".join(
