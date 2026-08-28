@@ -32,9 +32,15 @@
     "default": 1440
   },
   "timeout_seconds": {
-    "description": "单次 Codex 调用超时秒数",
+    "description": "单次主 Codex 调用超时秒数（10–3600；复杂任务建议 2400）",
     "type": "int",
     "default": 180
+  },
+  "progress_interval_seconds": {
+    "description": "复杂私聊任务的 TODO 进度汇报间隔秒数（60–600）",
+    "type": "int",
+    "default": 120,
+    "hint": "只对私聊且 effort 为 medium/high/xhigh/max 生效；Luna 总结失败时自动使用本地 TODO。"
   },
   "qq_chunk_chars": {
     "description": "QQ 单段回复最大字符数",

@@ -13,6 +13,7 @@ from astrbot.api.star import StarTools
 from astrbot_plugin_codex_bridge.bridge_core import CodexResult
 from astrbot_plugin_codex_bridge.group_context import GroupContextManager
 from astrbot_plugin_codex_bridge.main import CodexBridgePlugin
+from astrbot_plugin_codex_bridge.progress import ProgressTracker
 
 
 class GroupEvent:
@@ -75,6 +76,7 @@ class FakeService:
         prompt: str,
         model: str | None = None,
         effort: str | None = None,
+        progress_tracker: ProgressTracker | None = None,
     ) -> CodexResult:
         self.prompts.append(prompt)
         return CodexResult(thread_id="thread_group_12345678", text="answer")

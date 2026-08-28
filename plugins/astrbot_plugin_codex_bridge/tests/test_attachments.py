@@ -17,6 +17,7 @@ from astrbot_plugin_codex_bridge.attachments import (
 )
 from astrbot_plugin_codex_bridge.bridge_core import CodexResult
 from astrbot_plugin_codex_bridge.main import CodexBridgePlugin
+from astrbot_plugin_codex_bridge.progress import ProgressTracker
 
 
 class FileEvent:
@@ -68,6 +69,7 @@ class FakeService:
         prompt: str,
         model: str | None = None,
         effort: str | None = None,
+        progress_tracker: ProgressTracker | None = None,
     ) -> CodexResult:
         self.prompts.append(prompt)
         return CodexResult("thread_attachment_12345678", "file answer")

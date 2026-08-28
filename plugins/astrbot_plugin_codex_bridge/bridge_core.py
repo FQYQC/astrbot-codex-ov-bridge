@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .progress import ProgressTracker
+
 
 CODEX_PATH = Path("/home/ubuntu/.local/bin/codex")
 CODEX_MODEL = "gpt-5.6-luna"
@@ -298,7 +300,7 @@ class CodexRunner:
         model: str = CODEX_MODEL,
         workspace: Path = CODEX_WORKSPACE,
     ) -> None:
-        self.timeout_seconds = max(10, min(int(timeout_seconds), 600))
+        self.timeout_seconds = max(10, min(int(timeout_seconds), 3600))
         self.codex_path = codex_path
         self.model = model
         self.workspace = workspace
@@ -367,10 +369,55 @@ class CodexRunner:
         return env
 
     @staticmethod
-    def parse_jsonl(stdout: bytes, existing_thread_id: str | None) -> CodexResult:
-        thread_id = existing_thread_id
-        final_message: str | None = None
-        failed = False
+    def _consume_jsonl_event(
+        event: dict[str, Any],
+        state: dict[str, Any],
+        progress_tracker: ProgressTracker | None = None,
+    ) -> None:
+        if progress_tracker is not None:
+            progress_tracker.ingest(event)
+        event_type = str(event.get("type", ""))
+        if event_type == "thread.started":
+            candidate = event.get("thread_id")
+            if candidate is None and isinstance(event.get("thread"), dict):
+                candidate = event["thread"].get("id")
+            if isinstance(candidate, str) and THREAD_ID_RE.fullmatch(candidate):
+                state["thread_id"] = candidate
+        elif event_type in {"turn.failed", "error"}:
+            state["failed"] = True
+        elif event_type == "agent_message":
+            candidate = event.get("text") or event.get("message")
+            if isinstance(candidate, str):
+                state["final_message"] = candidate
+        elif event_type in {"item.completed", "item.updated"}:
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                candidate = item.get("text") or item.get("message")
+                if not isinstance(candidate, str):
+                    content = item.get("content")
+                    if isinstance(content, list):
+                        parts = [
+                            part.get("text", "")
+                            for part in content
+                            if isinstance(part, dict)
+                            and isinstance(part.get("text"), str)
+                        ]
+                        candidate = "".join(parts)
+                if isinstance(candidate, str) and candidate.strip():
+                    state["final_message"] = candidate
+
+    @classmethod
+    def parse_jsonl(
+        cls,
+        stdout: bytes,
+        existing_thread_id: str | None,
+        progress_tracker: ProgressTracker | None = None,
+    ) -> CodexResult:
+        state: dict[str, Any] = {
+            "thread_id": existing_thread_id,
+            "final_message": None,
+            "failed": False,
+        }
 
         for raw_line in stdout.splitlines():
             if not raw_line.strip():
@@ -381,41 +428,15 @@ class CodexRunner:
                 continue
             if not isinstance(event, dict):
                 continue
-            event_type = str(event.get("type", ""))
-            if event_type == "thread.started":
-                candidate = event.get("thread_id")
-                if candidate is None and isinstance(event.get("thread"), dict):
-                    candidate = event["thread"].get("id")
-                if isinstance(candidate, str) and THREAD_ID_RE.fullmatch(candidate):
-                    thread_id = candidate
-            elif event_type in {"turn.failed", "error"}:
-                failed = True
-            elif event_type == "agent_message":
-                candidate = event.get("text") or event.get("message")
-                if isinstance(candidate, str):
-                    final_message = candidate
-            elif event_type in {"item.completed", "item.updated"}:
-                item = event.get("item")
-                if isinstance(item, dict) and item.get("type") == "agent_message":
-                    candidate = item.get("text") or item.get("message")
-                    if not isinstance(candidate, str):
-                        content = item.get("content")
-                        if isinstance(content, list):
-                            parts = [
-                                part.get("text", "")
-                                for part in content
-                                if isinstance(part, dict)
-                                and isinstance(part.get("text"), str)
-                            ]
-                            candidate = "".join(parts)
-                    if isinstance(candidate, str) and candidate.strip():
-                        final_message = candidate
+            cls._consume_jsonl_event(event, state, progress_tracker)
 
-        if failed:
+        if state["failed"]:
             raise CodexBridgeError("Codex reported a failed turn")
-        if not thread_id:
+        thread_id = state["thread_id"]
+        final_message = state["final_message"]
+        if not isinstance(thread_id, str):
             raise CodexBridgeError("Codex did not start a thread")
-        if not final_message or not final_message.strip():
+        if not isinstance(final_message, str) or not final_message.strip():
             raise CodexBridgeError("Codex did not return a final message")
         return CodexResult(thread_id=thread_id, text=final_message.strip())
 
@@ -425,6 +446,7 @@ class CodexRunner:
         thread_id: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        progress_tracker: ProgressTracker | None = None,
     ) -> CodexResult:
         if not self.codex_path.is_file():
             raise CodexBridgeError("Codex CLI is unavailable")
@@ -439,16 +461,49 @@ class CodexRunner:
                 cwd=self.workspace,
                 env=self._safe_environment(),
                 start_new_session=True,
-                limit=2 * 1024 * 1024,
+                limit=16 * 1024 * 1024,
             )
         except OSError as exc:
             raise CodexBridgeError("Codex CLI could not be started") from exc
 
+        state: dict[str, Any] = {
+            "thread_id": thread_id,
+            "final_message": None,
+            "failed": False,
+        }
+
+        async def consume_stdout() -> None:
+            assert process.stdout is not None
+            while True:
+                raw_line = await process.stdout.readline()
+                if not raw_line:
+                    return
+                if len(raw_line) > 2 * 1024 * 1024:
+                    continue
+                try:
+                    event = json.loads(raw_line)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if isinstance(event, dict):
+                    self._consume_jsonl_event(event, state, progress_tracker)
+
+        async def discard_stderr() -> None:
+            assert process.stderr is not None
+            while await process.stderr.read(64 * 1024):
+                pass
+
+        assert process.stdin is not None
+        process.stdin.write(prompt.encode("utf-8"))
         try:
-            stdout, _stderr = await asyncio.wait_for(
-                process.communicate(prompt.encode("utf-8")),
-                timeout=self.timeout_seconds,
-            )
+            await process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        process.stdin.close()
+        stream_task = asyncio.gather(
+            consume_stdout(), discard_stderr(), process.wait()
+        )
+        try:
+            await asyncio.wait_for(stream_task, timeout=self.timeout_seconds)
         except TimeoutError as exc:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -459,11 +514,37 @@ class CodexRunner:
                 except ProcessLookupError:
                     pass
                 await process.wait()
+            stream_task.cancel()
+            await asyncio.gather(stream_task, return_exceptions=True)
             raise CodexTimeoutError("Codex timed out") from exc
+        except Exception as exc:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except TimeoutError:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                await process.wait()
+            stream_task.cancel()
+            await asyncio.gather(stream_task, return_exceptions=True)
+            raise CodexBridgeError("Codex output stream failed") from exc
 
         if process.returncode != 0:
             raise CodexBridgeError("Codex exited unsuccessfully")
-        return self.parse_jsonl(stdout, thread_id)
+        if state["failed"]:
+            raise CodexBridgeError("Codex reported a failed turn")
+        result_thread_id = state["thread_id"]
+        final_message = state["final_message"]
+        if not isinstance(result_thread_id, str):
+            raise CodexBridgeError("Codex did not start a thread")
+        if not isinstance(final_message, str) or not final_message.strip():
+            raise CodexBridgeError("Codex did not return a final message")
+        return CodexResult(result_thread_id, final_message.strip())
 
     async def is_logged_in(self) -> bool:
         try:
@@ -511,12 +592,15 @@ class CodexBridgeService:
         prompt: str,
         model: str | None = None,
         effort: str | None = None,
+        progress_tracker: ProgressTracker | None = None,
     ) -> CodexResult:
         lock = await self._session_lock(session_key)
         async with lock:
             thread_id = await self.store.get(session_key)
             async with self._global_limit:
-                result = await self.runner.run(prompt, thread_id, model, effort)
+                result = await self.runner.run(
+                    prompt, thread_id, model, effort, progress_tracker
+                )
             if result.thread_id != thread_id:
                 await self.store.set(session_key, result.thread_id)
             return result

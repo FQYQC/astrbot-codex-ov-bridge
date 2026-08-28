@@ -33,7 +33,9 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 
 所有者也可以按 session 设置 reasoning effort：`/codex_effort none|low|medium|high|xhigh|max|default`。`/codex_effort_default none|low|medium|high|xhigh|max` 修改全局默认；已单独设置的私聊或群不受影响。`/codex_status` 会同时显示当前模型、effort 和 thread 状态。
 
-仅在私聊且当前 effort 为 `medium`/`high`/`xhigh`/`max` 时，Bridge 会立即回复已开始或已排队（含模型和 effort）；45 秒、120 秒仍未完成时各补充一次进度提示。`none`/`low` 以及所有群聊都不发进度消息，避免刷屏。
+仅在私聊且当前 effort 为 `medium`/`high`/`xhigh`/`max` 时，Bridge 会立即回复已开始或已排队（含模型和 effort），之后默认每 120 秒发送一次项目相关的 TODO 进度：具体列出已完成、正在进行和下一步。进度来自主 Codex 的 JSONL `todo_list` 与插件自身的阶段状态，再交给独立的 `gpt-5.6-luna`/`low` 只读临时会话整理；它不接收原始 QQ 消息、回复正文、命令输出、日志、路径或凭据。Luna 总结失败时自动回退到本地生成的详细 TODO，不影响主任务。`none`/`low` 以及所有群聊都不发进度消息，避免刷屏。
+
+主任务仍限制为最多 2 个不同 session 并发、同一 session 串行；进度总结另有 2 个独立 Luna 槽位，因此最多可同时运行 2 个主任务和 2 个轻量总结任务。总结会话使用 `--ephemeral`、`read-only` sandbox，不占主任务队列。单次主任务超时可在 WebUI 配置为 10–3600 秒；当前部署使用 2400 秒，超时后 Bridge 会终止对应 Codex 进程而不是放任其后台继续。
 
 QQ 文件会被复制到专用工作区的私有随机路径再交给 Codex 只读分析；单文件上限 20 MiB，每次最多 3 个且合计上限 40 MiB，暂存 7 天后清理。下载仅允许公网 HTTP(S) 目标，文件名、QQ 下载地址和暂存路径不写入 OpenViking。群文件仍要求同条消息 `@` 机器人。
 

@@ -17,6 +17,7 @@ from astrbot_plugin_codex_bridge.bridge_core import (
     model_from_choice,
     split_qq_message,
 )
+from astrbot_plugin_codex_bridge.progress import ProgressTracker
 
 
 class FakeRunner:
@@ -32,6 +33,7 @@ class FakeRunner:
         thread_id: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        progress_tracker: ProgressTracker | None = None,
     ) -> CodexResult:
         self.active += 1
         self.max_active = max(self.max_active, self.active)

@@ -11,8 +11,9 @@ kept outside Git.
   - Persistent per-session Codex thread, model, and reasoning-effort selection.
   - QQ file staging with size limits and public-network-only downloads.
   - Isolated OpenViking private-user and per-group memory integration.
-  - Owner-only management commands, group mention policy, bounded concurrency,
-    progress notifications, output splitting, and privacy filters.
+  - Owner-only management commands, group mention policy, two main-task slots,
+    two isolated Luna progress-summary slots, detailed TODO notifications,
+    output splitting, and privacy filters.
   - Unit and privacy-preserving live smoke tests.
 - `deployment/`
   - AstrBot installation through uv and a dedicated Python 3.12 runtime.
