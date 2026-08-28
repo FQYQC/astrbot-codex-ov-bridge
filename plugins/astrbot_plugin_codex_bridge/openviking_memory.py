@@ -1,4 +1,4 @@
-"""OpenViking-backed memory with per-QQ-user API-key isolation."""
+"""OpenViking-backed memory with isolated QQ-user and QQ-group principals."""
 
 from __future__ import annotations
 
@@ -40,6 +40,20 @@ def safe_memory_text(text: str, limit: int) -> str | None:
     if SENSITIVE_TERMS_RE.search(cleaned) or LONG_SECRET_RE.search(cleaned):
         return None
     return cleaned
+
+
+def safe_group_memory_text(sender_label: str, text: str, limit: int = 2000) -> str | None:
+    """Build a group-memory line without storing event IDs or unsafe secrets."""
+    safe_text = safe_memory_text(text, limit)
+    if not safe_text or safe_text.startswith("/"):
+        return None
+    safe_text = safe_text.replace("<", "＜").replace(">", "＞")
+    label = " ".join(str(sender_label).replace("\x00", "").split())[:40]
+    label = safe_memory_text(label, 40) or ""
+    label = label.replace("<", "＜").replace(">", "＞")
+    if not label or label.isdecimal():
+        label = "群成员"
+    return f"{label}: {safe_text}"
 
 
 class PrivateUserKeyStore:
@@ -160,8 +174,8 @@ class OpenVikingMemory:
         async with self._provision_guard:
             return self._provision_locks.setdefault(user_id, asyncio.Lock())
 
-    async def user_key(self, sender_id: str) -> tuple[str, str]:
-        user_id = safe_identifier("qq", sender_id)
+    async def _principal_key(self, prefix: str, raw_id: str) -> tuple[str, str]:
+        user_id = safe_identifier(prefix, raw_id)
         existing = await self.keys.get(user_id)
         if existing:
             return user_id, existing
@@ -193,8 +207,14 @@ class OpenVikingMemory:
             await self.keys.set(user_id, api_key)
             return user_id, api_key
 
+    async def user_key(self, sender_id: str) -> tuple[str, str]:
+        return await self._principal_key("qq", sender_id)
+
+    async def group_key(self, session_key: str) -> tuple[str, str]:
+        return await self._principal_key("group", session_key)
+
     @staticmethod
-    def _extract_context(response: dict[str, Any]) -> str:
+    def _extract_context(response: dict[str, Any], max_chars: int = 4000) -> str:
         result: Any = response.get("result", response)
         candidates: list[str] = []
         if isinstance(result, str):
@@ -215,7 +235,7 @@ class OpenVikingMemory:
                                     candidates.append(item[key])
                                     break
         combined = "\n".join(part.strip() for part in candidates if part.strip())
-        return combined[:4000]
+        return combined[:max_chars]
 
     async def recall(self, sender_id: str, session_key: str, query: str) -> str:
         safe_query = safe_memory_text(query, 4000)
@@ -244,6 +264,115 @@ class OpenVikingMemory:
         if status != 200:
             raise OpenVikingMemoryError("OpenViking recall failed")
         return self._extract_context(response)
+
+    async def recall_group(self, session_key: str, query: str) -> str:
+        safe_query = safe_memory_text(query, 4000)
+        if not safe_query:
+            return ""
+        group_id, api_key = await self.group_key(session_key)
+        memory_session = safe_identifier("group_session", session_key)
+        status, response = await self._request(
+            "/api/v1/search/search",
+            api_key,
+            method="POST",
+            actor_peer_id=group_id,
+            payload={
+                "query": safe_query,
+                "session_id": memory_session,
+                "limit": 6,
+                "mode": "context",
+                "query_expansion": "off",
+                "max_tokens": 1024,
+                "purpose": "chat",
+                "detail": "abstract",
+                "peer_scope": "actor",
+                "rewrite": False,
+            },
+        )
+        if status != 200:
+            raise OpenVikingMemoryError("OpenViking group recall failed")
+        return self._extract_context(response, 12000)
+
+    async def _commit_group_session(
+        self, session_id: str, api_key: str
+    ) -> None:
+        quoted_session = urllib.parse.quote(session_id, safe="")
+        status, _ = await self._request(
+            f"/api/v1/sessions/{quoted_session}/commit",
+            api_key,
+            method="POST",
+            payload={
+                "retention_mode": "turn_budget",
+                "keep_recent_turn_count": 100,
+                "retained_message_token_budget": 20000,
+                "min_raw_tail_steps": 20,
+                "telemetry": False,
+            },
+        )
+        if status != 200:
+            raise OpenVikingMemoryError("OpenViking group commit failed")
+
+    async def remember_group_message(
+        self,
+        session_key: str,
+        sender_label: str,
+        message: str,
+    ) -> None:
+        safe_message = safe_group_memory_text(sender_label, message)
+        if not safe_message:
+            return
+        group_id, api_key = await self.group_key(session_key)
+        session_id = safe_identifier("group_session", session_key)
+        quoted_session = urllib.parse.quote(session_id, safe="")
+        status, _ = await self._request(
+            f"/api/v1/sessions/{quoted_session}/messages",
+            api_key,
+            method="POST",
+            payload={
+                "role": "user",
+                "peer_id": group_id,
+                "content": safe_message,
+                "message_kind": "user_query",
+                "telemetry": False,
+            },
+        )
+        if status != 200:
+            raise OpenVikingMemoryError("OpenViking group message write failed")
+        await self._commit_group_session(session_id, api_key)
+
+    async def remember_group_turn(
+        self,
+        session_key: str,
+        sender_label: str,
+        user_message: str,
+        assistant_message: str,
+    ) -> None:
+        safe_user = safe_group_memory_text(sender_label, user_message, 8000)
+        safe_assistant = safe_memory_text(assistant_message, 12000)
+        if not safe_user or not safe_assistant:
+            return
+        group_id, api_key = await self.group_key(session_key)
+        session_id = safe_identifier("group_session", session_key)
+        quoted_session = urllib.parse.quote(session_id, safe="")
+        for role, content, message_kind in (
+            ("user", safe_user, "user_query"),
+            ("assistant", safe_assistant, "assistant_step"),
+        ):
+            status, _ = await self._request(
+                f"/api/v1/sessions/{quoted_session}/messages",
+                api_key,
+                method="POST",
+                payload={
+                    "role": role,
+                    "peer_id": group_id,
+                    "content": content,
+                    "message_kind": message_kind,
+                    "telemetry": False,
+                },
+            )
+            if status != 200:
+                raise OpenVikingMemoryError("OpenViking group turn write failed")
+        await self._commit_group_session(session_id, api_key)
 
     async def remember(
         self,

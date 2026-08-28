@@ -21,6 +21,16 @@
     "type": "bool",
     "default": true
   },
+  "group_context_max_messages": {
+    "description": "群近期内存上下文最多保留的纯文本条数（不限制 OV 长期记忆）",
+    "type": "int",
+    "default": 100
+  },
+  "group_context_ttl_minutes": {
+    "description": "群近期内存上下文保留分钟数（不删除 OV 长期记忆）",
+    "type": "int",
+    "default": 1440
+  },
   "timeout_seconds": {
     "description": "单次 Codex 调用超时秒数",
     "type": "int",

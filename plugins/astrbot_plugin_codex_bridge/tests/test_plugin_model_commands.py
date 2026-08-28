@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import astrbot.api.message_components as Comp
 from astrbot.api.platform import MessageType
 from astrbot.api.star import StarTools
 
@@ -12,10 +13,17 @@ from astrbot_plugin_codex_bridge.main import CodexBridgePlugin
 
 
 class CommandEvent:
-    def __init__(self, sender_id: str, session_id: str, message: str) -> None:
+    def __init__(
+        self,
+        sender_id: str,
+        session_id: str,
+        message: str,
+        components: list[object] | None = None,
+    ) -> None:
         self.sender_id = sender_id
         self.session_id = session_id
         self.message = message
+        self.components = components or []
         self.call_llm = True
         self.stopped = False
 
@@ -41,7 +49,7 @@ class CommandEvent:
         return "bot"
 
     def get_messages(self) -> list[object]:
-        return []
+        return self.components
 
     def plain_result(self, text: str) -> str:
         return text
@@ -99,6 +107,20 @@ class PluginModelCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await self.plugin.model_preferences.current("private"),
             ("gpt-5.6-luna", False),
+        )
+
+    async def test_private_plain_component_normalizes_invisible_command_text(self) -> None:
+        event = CommandEvent(
+            "owner",
+            "private",
+            "display text that must not control command parsing",
+            [Comp.Plain("\u200b／codex_model sol")],
+        )
+        reply = await collect(self.plugin, event)
+        self.assertTrue(reply and "sol" in reply[0].lower())
+        self.assertEqual(
+            await self.plugin.model_preferences.current("private"),
+            ("gpt-5.6-sol", True),
         )
 
 

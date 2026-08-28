@@ -7,6 +7,7 @@ from typing import Any
 
 from astrbot_plugin_codex_bridge.openviking_memory import (
     OpenVikingMemory,
+    safe_group_memory_text,
     safe_identifier,
     safe_memory_text,
 )
@@ -52,6 +53,13 @@ class OpenVikingMemoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(safe_memory_text("Authorization: Bearer secret", 1000))
         self.assertIsNone(safe_memory_text("A" * 64, 1000))
         self.assertEqual(safe_memory_text("普通对话", 1000), "普通对话")
+        self.assertIsNone(
+            safe_group_memory_text("Alice", "Authorization: Bearer hidden")
+        )
+        self.assertEqual(
+            safe_group_memory_text("123456789", "今晚八点开会"),
+            "群成员: 今晚八点开会",
+        )
 
     async def test_two_senders_receive_distinct_user_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -62,6 +70,38 @@ class OpenVikingMemoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(key_a, key_b)
             self.assertEqual((await memory.user_key("sender-a"))[1], key_a)
             self.assertEqual(len(memory.provisioned), 2)
+
+    async def test_groups_are_shared_within_group_and_isolated_between_groups(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            memory = FakeOpenVikingMemory(Path(temporary_dir))
+            group_a, key_a = await memory.group_key("group-session-a")
+            group_b, key_b = await memory.group_key("group-session-b")
+            self.assertNotEqual(group_a, group_b)
+            self.assertNotEqual(key_a, key_b)
+            self.assertNotIn("group-session-a", group_a)
+            self.assertEqual((await memory.group_key("group-session-a"))[1], key_a)
+
+    async def test_group_recall_and_writes_use_group_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            memory = FakeOpenVikingMemory(Path(temporary_dir))
+            context = await memory.recall_group("group-session", "会议时间")
+            await memory.remember_group_message(
+                "group-session", "Alice", "今晚八点开会"
+            )
+            await memory.remember_group_turn(
+                "group-session", "Owner", "几点开会", "今晚八点"
+            )
+            self.assertEqual(context, "isolated memory")
+            business_calls = [call for call in memory.calls if "/admin/" not in call[0]]
+            self.assertTrue(business_calls)
+            self.assertTrue(
+                all(call[1] != memory.admin_api_key for call in business_calls)
+            )
+            contents = [
+                str((payload or {}).get("content", ""))
+                for _, _, payload in business_calls
+            ]
+            self.assertTrue(any("Alice: 今晚八点开会" in item for item in contents))
 
     async def test_recall_and_remember_use_user_key_not_admin_key(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
