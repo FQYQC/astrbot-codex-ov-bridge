@@ -6,6 +6,9 @@ kept outside Git.
 
 ## Included
 
+- `AGENTS.md` and `docs/DEPLOYMENT_STATE.md`
+  - Secret-free project operating rules and a dated deployment/verification
+    handoff that new Codex sessions can load without relying on chat history.
 - `plugins/astrbot_plugin_codex_bridge/`
   - OneBot-only AstrBot plugin that invokes the local Codex CLI.
   - Persistent per-session Codex thread, model, and reasoning-effort selection.

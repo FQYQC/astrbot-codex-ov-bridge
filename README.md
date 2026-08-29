@@ -2,7 +2,7 @@
 
 本仓库保存可复现的部署代码：普通 QQ 经 NapCat/OneBot v11 接入 AstrBot，AstrBot 插件直接调用本机 Codex CLI，并使用 OpenViking 保存隔离的长期记忆。它不使用 VikingBot，不配置 OpenAI-compatible Provider，也不需要额外 OpenAI API Key。
 
-仓库内容与排除的运行数据详见 [`docs/REPOSITORY_CONTENTS.md`](docs/REPOSITORY_CONTENTS.md)。
+仓库内容与排除的运行数据详见 [`docs/REPOSITORY_CONTENTS.md`](docs/REPOSITORY_CONTENTS.md)。跨 Codex thread 的当前部署状态、验证证据与剩余运维工作记录在 [`docs/DEPLOYMENT_STATE.md`](docs/DEPLOYMENT_STATE.md)；新会话由根目录 [`AGENTS.md`](AGENTS.md) 指引先读取该状态页。
 
 ## 安全边界
 
