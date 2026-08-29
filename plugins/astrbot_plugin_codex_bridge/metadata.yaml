@@ -1,8 +1,8 @@
 name: astrbot_plugin_codex_bridge
 display_name: Codex Bridge
 short_desc: Route allowlisted OneBot messages to the local Codex CLI.
-desc: Direct local Codex CLI bridge with AstrBot personas, isolated memory, and detailed progress.
-version: 0.8.0
+desc: Direct local Codex CLI bridge with AstrBot personas and examples, isolated memory, and detailed progress.
+version: 0.9.0
 author: local
 repo: ""
 astrbot_version: ">=4.27,<5"

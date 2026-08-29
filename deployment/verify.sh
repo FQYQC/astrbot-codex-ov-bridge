@@ -139,6 +139,13 @@ free -h | awk '/^Mem:/ {print "memory_used=" $3 ",memory_available=" $7} /^Swap:
 docker stats --no-stream --format '{{.Name}} memory={{.MemUsage}} cpu={{.CPUPerc}}' \
   personal-ai-openviking personal-ai-ollama personal-ai-napcat 2>/dev/null || true
 
+python3 "${DEPLOY_ROOT}/deployment/update_astrbot_persona.py" \
+  --database "${DEPLOY_ROOT}/astrbot/data/data_v4.db" \
+  --persona-file "${DEPLOY_ROOT}/personas/fywy.json" \
+  --backup-dir "${DEPLOY_ROOT}/astrbot/backups" \
+  --validate-only >/dev/null
+echo 'persona_template_valid=true'
+
 PYTHONPATH="${DEPLOY_ROOT}/plugins" \
   "${DEPLOY_ROOT}/astrbot/uv-tools/astrbot/bin/python" -m unittest discover \
   -s "${DEPLOY_ROOT}/plugins/astrbot_plugin_codex_bridge/tests" \

@@ -12,6 +12,7 @@ from astrbot.api import sp
 class AstrBotPersona:
     persona_id: str
     prompt: str
+    examples: tuple[tuple[str, str], ...] = ()
 
 
 class AstrBotPersonaAdapter:
@@ -70,7 +71,37 @@ class AstrBotPersonaAdapter:
         prompt = prompt.replace("\x00", "").strip()[: self.max_prompt_chars]
         if not prompt:
             return None
-        return AstrBotPersona(persona_id=persona_id[:255], prompt=prompt)
+        return AstrBotPersona(
+            persona_id=persona_id[:255],
+            prompt=prompt,
+            examples=self._extract_examples(persona),
+        )
+
+    @staticmethod
+    def _extract_examples(persona: Any) -> tuple[tuple[str, str], ...]:
+        """Read AstrBot's alternating user/assistant preset-dialog format."""
+        try:
+            raw_dialogs = persona.get("begin_dialogs", [])
+        except (AttributeError, TypeError):
+            return ()
+        if not isinstance(raw_dialogs, list) or len(raw_dialogs) % 2 != 0:
+            return ()
+        examples: list[tuple[str, str]] = []
+        total_chars = 0
+        for index in range(0, min(len(raw_dialogs), 12), 2):
+            user = raw_dialogs[index]
+            assistant = raw_dialogs[index + 1]
+            if not isinstance(user, str) or not isinstance(assistant, str):
+                continue
+            user = user.replace("\x00", "").strip()[:1500]
+            assistant = assistant.replace("\x00", "").strip()[:2000]
+            if not user or not assistant:
+                continue
+            if total_chars + len(user) + len(assistant) > 8000:
+                break
+            examples.append((user, assistant))
+            total_chars += len(user) + len(assistant)
+        return tuple(examples)
 
     async def current_id(self, event: Any) -> str | None:
         persona_id, _ = await self._resolve_raw(event)

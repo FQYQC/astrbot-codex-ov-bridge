@@ -33,7 +33,9 @@ ssh -N -L 6099:127.0.0.1:6099 -L 6185:127.0.0.1:6185 ubuntu@YOUR_VPS_IP
 
 所有者也可以按 session 设置 reasoning effort：`/codex_effort none|low|medium|high|xhigh|max|default`。`/codex_effort_default none|low|medium|high|xhigh|max` 修改全局默认；已单独设置的私聊或群不受影响。`/codex_status` 会同时显示当前模型、effort 和 thread 状态。
 
-Bridge 会复用 AstrBot 原生人格系统。最终人格按 AstrBot 的 session 强制人格、当前 conversation 人格、WebUI 默认人格顺序解析，并作为受信任的独立指令块交给 Codex；这不会启用或调用 AstrBot 的普通 LLM Provider。人格仍在 AstrBot WebUI 中创建、编辑；所有者可在 QQ 会话内用 `/codex_persona list`、`/codex_persona <人格名>`、`/codex_persona inherit`、`/codex_persona off` 查看或切换。切换会清除当前 Codex thread 映射，避免旧人格残留；`/codex_status` 会显示 Bridge 当前解析到的人格 ID。人格的工具/Skills 白名单暂不直接映射到 Codex CLI，因为两边工具模型不同。
+Bridge 会复用 AstrBot 原生人格系统。最终人格按 AstrBot 的 session 强制人格、当前 conversation 人格、WebUI 默认人格顺序解析，并作为受信任的独立指令块交给 Codex；AstrBot 的交替用户/助手预设对话也会作为明确标记的虚构风格示例注入，不会被误认为真实聊天记录。这不会启用或调用 AstrBot 的普通 LLM Provider。人格仍在 AstrBot WebUI 中创建、编辑；所有者可在 QQ 会话内用 `/codex_persona list`、`/codex_persona <人格名>`、`/codex_persona inherit`、`/codex_persona off` 查看或切换。切换会清除当前 Codex thread 映射，避免旧人格残留；`/codex_status` 会显示 Bridge 当前解析到的人格 ID。人格的工具/Skills 白名单暂不直接映射到 Codex CLI，因为两边工具模型不同。
+
+仓库提供了不含秘密的万叶人格模板 [`personas/fywy.json`](personas/fywy.json)，包括系统提示词和 6 组原创预设对话。它把 QQ 闲聊视为朋友聊天：有群聊或长期记忆线索时直接接住称呼、关系梗和轻微调侃，避免身份核验式免责声明，也不会机械称用户为“旅行者”。`deployment/update_astrbot_persona.py` 只更新已存在的同名 AstrBot 人格，并先在忽略目录创建权限为 `0600` 的 SQLite 一致性备份；不会覆盖人格的工具、Skills、文件夹或其他人格。
 
 仅在私聊且当前 effort 为 `medium`/`high`/`xhigh`/`max` 时，Bridge 会立即回复已开始或已排队（含模型和 effort），之后默认每 120 秒发送一次项目相关的 TODO 进度：具体列出已完成、正在进行和下一步。进度来自主 Codex 的 JSONL `todo_list` 与插件自身的阶段状态，再交给独立的 `gpt-5.6-luna`/`low` 只读临时会话整理；它不接收原始 QQ 消息、回复正文、命令输出、日志、路径或凭据。Luna 总结失败时自动回退到本地生成的详细 TODO，不影响主任务。`none`/`low` 以及所有群聊都不发进度消息，避免刷屏。
 

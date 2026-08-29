@@ -31,7 +31,7 @@ Claude Code login are intentionally out of scope.
 | Host | Ubuntu 26.04 x86_64, 2 vCPU, about 4 GiB RAM, 2 GiB swap |
 | AstrBot | 4.27.4, uv-managed Python 3.12.14, systemd active and enabled |
 | Codex CLI | 0.151.0, ChatGPT login valid, absolute binary path required |
-| Codex Bridge | 0.8.0, loaded from the repository through the AstrBot plugin symlink |
+| Codex Bridge | 0.9.0, loaded from the repository through the AstrBot plugin symlink |
 | NapCat | Digest-pinned image from `versions.lock`, running with `unless-stopped` |
 | OpenViking | 0.4.16, healthy, existing data preserved |
 | Ollama | Running with `unless-stopped`; embedding workload remains local |
@@ -69,8 +69,9 @@ for boot and active.
   persistent global defaults and owner-only modification commands.
 - The owner can select AstrBot-native personas per QQ session. Persona prompts
   are injected as a separate trusted instruction block without enabling an
-  AstrBot LLM provider. Switching persona currently starts a fresh Codex thread;
-  OpenViking memory is retained.
+  AstrBot LLM provider. AstrBot's alternating preset dialogs are injected as
+  explicitly fictional style examples, not as real history. Switching persona
+  currently starts a fresh Codex thread; OpenViking memory is retained.
 - Same-session messages are serialized. Up to two main QQ sessions run at once.
   Private medium-or-higher effort tasks receive detailed 120-second progress
   summaries from two separate ephemeral Luna/low read-only slots.
@@ -90,8 +91,17 @@ for boot and active.
 
 2026-08-29:
 
+- Deployed Bridge 0.9.0 and the public-safe `fywy` persona template. AstrBot
+  loaded its prompt plus six alternating preset-dialog pairs; a real Luna call
+  confirmed both blocks were injected, produced a non-empty response, and did
+  not echo the persona prompt. The previous runtime persona database was backed
+  up consistently with mode `0600` before the update.
+- The `fywy` template prioritizes casual QQ conversation over audit-style
+  hedging. A live Luna smoke with wholly fictional group context recognized the
+  implied relationship, avoided the configured conservative boilerplate and
+  unsolicited “旅行者”, and stayed within the short-chat limit.
 - `./deployment/verify.sh`: all service, login, listener, exposure, health, and
-  resource checks passed; 48 unit tests passed. The script now exits nonzero on
+  resource checks passed; 49 unit tests passed. The script now exits nonzero on
   critical service, version, restart-policy, listener, link, or file-mode drift.
 - Real simulated OneBot private event: first Codex turn passed, resume passed,
   thread persisted, default AstrBot LLM stayed blocked, and both events stopped.

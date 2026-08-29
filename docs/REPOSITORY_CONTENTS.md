@@ -26,6 +26,10 @@ kept outside Git.
   - NapCat and AstrBot OneBot v11 configuration helpers.
   - OpenViking scoped-account provisioning without printing credentials.
   - Deployment verification and repository secret scanning.
+- `personas/`
+  - Public-safe AstrBot persona templates with original style examples and
+    casual-chat behavior fixtures; runtime persona selection and databases
+    remain excluded.
 - `napcat/compose.yaml`
   - Digest-pinned NapCat container definition with localhost-only WebUI.
 - `versions.lock`

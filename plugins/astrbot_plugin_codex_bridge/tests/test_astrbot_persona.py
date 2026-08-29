@@ -26,7 +26,11 @@ class FakePersonaManager:
         self.kwargs = kwargs
         return (
             "created-persona",
-            {"name": "created-persona", "prompt": "保持简洁且有角色风格。"},
+            {
+                "name": "created-persona",
+                "prompt": "保持简洁且有角色风格。",
+                "begin_dialogs": ["今日如何？", "风清气朗，适合出行。"],
+            },
             None,
             False,
         )
@@ -56,6 +60,9 @@ class AstrBotPersonaTests(unittest.IsolatedAsyncioTestCase):
         assert selected is not None
         self.assertEqual(selected.persona_id, "created-persona")
         self.assertIn("角色风格", selected.prompt)
+        self.assertEqual(
+            selected.examples, (("今日如何？", "风清气朗，适合出行。"),)
+        )
 
     async def test_missing_astrbot_context_fails_closed(self) -> None:
         self.assertIsNone(await AstrBotPersonaAdapter(object()).resolve(FakeEvent()))
@@ -90,12 +97,23 @@ class AstrBotPersonaTests(unittest.IsolatedAsyncioTestCase):
         prompt = CodexBridgePlugin._build_prompt(
             "当前问题",
             persona_prompt="保持简洁且有角色风格。",
+            persona_examples=(("今日如何？", "风清气朗，适合出行。"),),
         )
         self.assertIn("<astrbot_persona_instructions>", prompt)
+        self.assertIn("<astrbot_persona_examples>", prompt)
         self.assertIn("保持简洁且有角色风格。", prompt)
+        self.assertIn("风清气朗", prompt)
         self.assertLess(
             prompt.index("<astrbot_persona_instructions>"),
             prompt.index("<current_user_message>"),
+        )
+
+    def test_invalid_or_unpaired_examples_are_ignored(self) -> None:
+        self.assertEqual(
+            AstrBotPersonaAdapter._extract_examples(
+                {"begin_dialogs": ["只有用户，没有助手"]}
+            ),
+            (),
         )
 
 
