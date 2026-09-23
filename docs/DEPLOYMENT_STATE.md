@@ -1,6 +1,6 @@
 # Deployment state and handoff
 
-Last verified: 2026-09-23 UTC (targeted MCP repair and deployment checks below)
+Last verified: 2026-08-29 UTC
 
 This is the public-safe continuity record for new Codex sessions and server
 migrations. It deliberately excludes IP addresses, QQ identifiers, credentials,
@@ -88,20 +88,6 @@ for boot and active.
 - OpenViking write failures never block the QQ response.
 
 ## Verification ledger
-
-2026-09-23:
-
-- Repaired the separate baishi-aa MCP bridge's response parser: `error: null`
-  now permits successful results; non-null and tool-level errors still fail.
-  This service does not route through AstrBot. The reproducible source patch is
-  `deployment/patches/baishi-aa-null-error.patch`; offline regression tests are
-  `deployment/test_baishi_response.py` (run with the MCP service's virtualenv).
-- Restarted only the baishi-aa MCP supervisor. Offline parsing and safety tests
-  passed; live read-only ledger listing and restricted future-date search passed;
-  the tunnel readiness check passed. No upstream writes were performed.
-- Repository deployment verification detected Codex CLI version drift: installed
-  0.155.1 versus pinned/tested 0.151.0. The pin was not changed and the new version
-  has not been accepted by integration smoke tests in this repair.
 
 2026-08-29:
 
