@@ -1,0 +1,10 @@
+--- a/server.py
++++ b/server.py
+@@ -247,6 +247,6 @@
+     @staticmethod
+     def _extract_result(response: dict[str, Any]) -> Any:
+-        if "error" in response:
++        if response.get("error") is not None:
+             error = response["error"] or {}
+             raise RuntimeError(f"Bestrie API error: {error.get('message', 'unknown error')}")
+         result = response.get("result", {})
