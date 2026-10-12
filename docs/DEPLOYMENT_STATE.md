@@ -4,17 +4,9 @@ Last verified: 2026-08-29 UTC
 
 ## Scoped operational check: 2026-10-12 UTC
 
-- The unrelated private 百事AA MCP deployment was moved out of this repository's
-  ignored agent workspace to `/home/ubuntu/baishi-aa`. Its service, tunnel,
-  credentials, confirmation database, personal rules, plugins, logs, backups,
-  and independent Python runtime now live there. No compatibility symlink or
-  active configuration depends on the QQ assistant tree.
-- After relocation, MCP and tunnel health/readiness returned 200; response
-  parsing and confirmation safety tests, real privacy-safe read-only ledger
-  connectivity, and secret audits passed. No upstream bill writes occurred.
 - AstrBot and the three QQ/memory deployment containers remain running;
   localhost/bridge listeners, OpenViking health, and 49 unit tests passed.
-- `./deployment/verify.sh` failed one assertion both before and after relocation:
+- `./deployment/verify.sh` failed one assertion:
   the installed Codex CLI is 0.162.1 while `versions.lock` expects tested 0.151.0.
   This pre-existing version drift has not been accepted as a tested upgrade.
   The earlier full verification date and pinned/tested versions remain unchanged.
